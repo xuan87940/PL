@@ -1,0 +1,1967 @@
+# include <stdio.h>
+# include <string.h>
+# include <stdlib.h>
+# include <ctype.h>
+# include <iostream>
+
+using namespace std;
+static int uTestNum = 0;
+typedef char Str300[ 300 ];
+enum TokenType { LPAREN = 87940, RPAREN = 87941, INT = 87942, STRING = 87943,
+                    DOT = 87944, FLOAT = 87945, NIL = 87946, T = 87947, QUOTE = 87948,
+                    SYMBOL = 87949, NOCOUT = 87950, FUNC = 87958
+};
+
+enum ErrorType { UNBOUNDSYMBOL = 87951, INCORRECTNUM = 87952, NOTFUNCTION = 87953,
+                    INCORRECTTYPE = 87954, FORMATERROR = 87955,
+                    CONDFORMATERROR = 87956, NORETURNVALUE = 87957
+};
+
+struct Tree {
+  Str300 sexp;
+  int type;
+  int * site;
+  bool haveDot;
+  bool haveQuote;
+  Tree * left;
+  Tree * right;
+  Tree * next;
+};
+
+typedef Tree * TreePtr ;
+Str300 gStr;
+int gLine = 1;
+int gColumn = 0;
+Str300 gDefine = "define", gClean = "clean-environment", gCons = "cons";
+Str300 gList = "list", gCar = "car", gCdr = "cdr";
+Str300 gPair = "pair?", gSymbol = "symbol?", gNull = "null?";
+Str300 gInteger = "integer?", gReal = "real?", gNumber = "number?";
+Str300 gString = "string?", gBoolean = "boolean?", gPlus = "+";
+Str300 gDivide = "/", gMinus = "-", gMultiply = "*";
+Str300 gMoreover = ">", gMorethan = ">=", gLessover = "<";
+Str300 gLessthan = "<=", gEqual = "=", gStringAppend = "string-append";
+Str300 gStringCom = "string>?", gNot = "not", gAnd = "and";
+Str300 gOr = "or", gEqv = "eqv?", gEqu = "equal?";
+Str300 gIf = "if", gCond = "cond", gBegin = "begin";
+
+TreePtr gHead = NULL;
+TreePtr gEvalHead = NULL;
+bool gGetDOT = false ;
+bool gError = false ;
+bool gEvalError = false;
+bool gEOF = false;
+
+void BuildTree() ;
+void Tree1( bool haveLeft, TreePtr walk ) ;
+TreePtr QuoteTree() ;
+TreePtr Scan() ;
+void DeleteTree( TreePtr & head ) ;
+void ReadGarbage() ;
+void HandleString( Str300 & sexp ) ;
+void HandleFloat( int fl ) ;
+void HandleNIL( TreePtr & head, int treeLEFT, int treeRIGHT ) ;
+void OutputTree( TreePtr head, int treeLEFT, int treeRIGHT ) ;
+void HandleQuote( TreePtr & head, bool haveQ, int treeLEFT, int treeRIGHT ) ;
+void CopyTree( TreePtr tree1, TreePtr & tree2 ) ;
+TreePtr Eval( TreePtr head, bool first ) ;
+bool IsFunc( TreePtr head ) ;
+TreePtr CSymbol( TreePtr head, TreePtr walk ) ;
+bool DSymbol( TreePtr target, TreePtr head, TreePtr walk ) ;
+TreePtr IsSymbol( TreePtr inputSymbol, TreePtr walk ) ;
+TreePtr Define( TreePtr temp ) ;
+TreePtr Cons_List( TreePtr & temp, bool first ) ;
+TreePtr Car_Cdr( TreePtr & temp, bool first ) ;
+TreePtr Prim( TreePtr & temp, bool first ) ;
+TreePtr Arithmetic( TreePtr & temp, bool first ) ;
+TreePtr Compare( TreePtr & temp, bool first ) ;
+TreePtr StringAppend( TreePtr & temp, bool first ) ;
+TreePtr StringCompare( TreePtr & temp, bool first ) ;
+TreePtr Not_And_Or( TreePtr & temp, bool first ) ;
+TreePtr Eqv_Equal( TreePtr & temp, bool first ) ;
+bool EqualR( TreePtr tree1, TreePtr tree2 ) ;
+TreePtr Iff( TreePtr & temp, bool first ) ;
+TreePtr Cond( TreePtr & temp, bool first ) ;
+TreePtr Begin( TreePtr & temp, bool first ) ;
+void EvalError( TreePtr temp ) ;
+void Output( TreePtr head, bool hasDot, int count, bool & coutSPACE ) ;
+
+int main(int argc, char** argv) {
+  char ch = '\0' ;
+  char readEOF;
+  bool continous = true; // EOF
+  bool exit = false ; // 出現(EXIT)
+  TreePtr temp = NULL ;
+  cin >> uTestNum ;
+  cout << "Welcome to OurScheme!\n";
+  cin.get( ch ) ;
+  ReadGarbage();
+  if ( cin.peek() == EOF ) continous = false;
+  while ( continous && !exit ) {
+    // DeleteTree( gHead );
+    gHead = new Tree;
+    gError = false;
+    gEvalError = false;
+    gGetDOT = false ;
+    BuildTree();
+    temp = gHead;
+    if ( !gError ) {
+      cout << "\n> ";
+      if ( strcmp( gHead->sexp, "(" ) == 0 && strcmp( gHead->left->sexp, "exit" ) == 0 &&
+           ( gHead->right == NULL || strcmp( gHead->right->sexp, "nil" ) == 0 ) )
+        exit = true;
+      else {
+        int treeLEFT =  0, treeRIGHT = 0, count = 0;
+        HandleQuote( temp, false, treeLEFT, treeRIGHT );
+        temp = Eval( temp, true ) ;
+        HandleNIL( temp, treeLEFT, treeRIGHT );
+        if ( gEvalError )
+          EvalError( temp );
+        else {
+          bool coutSPACE = true;
+          if ( strcmp( temp->sexp, "(" ) != 0 ) {
+            if ( IsFunc( temp ) && !temp->haveQuote ) strcpy( temp->sexp, "#<internal function>" );
+            cout << temp->sexp << "\n";
+          } // if
+          else Output( temp, temp->haveDot, count, coutSPACE );
+        } // else
+      } // else
+    } // if
+
+    if ( !exit ) ReadGarbage();
+    if ( !exit && cin.peek() == EOF ) continous = false;
+  } // while
+
+  if ( !exit )
+    cout << "\n> ERROR : END-OF-FILE encountered when there should be more input\n"
+            << "\nThanks for using OurScheme!";
+  else cout << "\nThanks for using OurScheme!";
+
+  return 0;
+} // main()
+
+void DeleteTree( TreePtr & head ) {
+  if ( head != NULL ) {
+    DeleteTree( head->left );
+    DeleteTree( head->right );
+    head->left = NULL;
+    head->right = NULL;
+    delete head;
+  } // if
+} // DeleteTree()
+
+void ReadGarbage() {
+  char check = cin.peek();
+  if ( check == EOF ) gEOF = true;
+  char scanChar = '\0';
+  while ( check != EOF && ( check == ' ' || check == '\n' || check == ';' ) ) { // 讀掉空白換行分號
+    cin.get( scanChar );
+    // cout << check;
+    if ( check == ' ' ) gColumn++;
+    else if ( check == '\n' ) {
+      gColumn = 0;
+      gLine++;
+    } // else if
+    else if ( check == ';' ) {
+      for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+        cin.get( scanChar );
+      check = cin.peek();
+      if ( check == EOF ) gEOF = true;
+      else {
+        cin.get( scanChar );
+        gColumn = 0;
+        gLine++;
+      } // else
+    } // else if
+
+    // cout << " " << gLine << endl;
+    check = cin.peek();
+    if ( check == EOF ) gEOF = true;
+  } // while
+} // ReadGarbage()
+
+void BuildTree() {
+  ReadGarbage();
+  char check = cin.peek();
+  if ( check == EOF ) gEOF = true;
+  char scanChar = '\0';
+
+  if ( !gError && check != EOF ) {
+    TreePtr temp = new Tree;
+    if ( check != '(' && check != '\'' && check != ')' ) temp = Scan();
+
+    if ( check == '(' ) {
+      if ( gLine == 0 ) gLine++;
+      cin.get( gHead->sexp[0] );
+      gColumn++;
+      gHead->sexp[1] = '\0';
+      ReadGarbage();
+      check = cin.peek();
+      if ( check == EOF ) gEOF = true;
+      else if ( check == ')' ) {
+        strcpy( gHead->sexp, "nil" );
+        cin.get( scanChar );
+        gHead->type = NIL;
+        gHead->left = NULL;
+        gHead->right = NULL;
+        gLine = 0;
+        gColumn = 0;
+      } // else if
+      else {
+        gHead->left = NULL;
+        gHead->right = NULL;
+        gHead->type = LPAREN;
+        gHead->haveDot = false;
+        TreePtr walk = gHead;
+        bool haveLeft = false;
+        Tree1( haveLeft, walk );
+        if ( !gError ) {
+          ReadGarbage();
+          check = cin.peek();
+          if ( check == EOF ) gEOF = true;
+          if ( check == ')' ) cin.get( scanChar );
+          gLine = 0;
+          gColumn = 0;
+        } // if
+      } // else
+    } // if
+    else if ( check == '\'' ) {
+      if ( gLine == 0 ) gLine++;
+      cin.get( scanChar );
+      gColumn++;
+      gHead = QuoteTree();
+      gLine = 0;
+      gColumn = 0;
+    } // else if
+    else if ( check == ')' ) {
+      gError = true;
+      if ( gLine < 1 ) gLine = 1;
+      gColumn++;
+      cout << "\n> ERROR (unexpected character) : " ;
+      cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+      for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+        cin.get( scanChar );
+      check = cin.peek();
+      if ( check == EOF ) gEOF = true;
+      else {
+        cin.get( scanChar );
+        gColumn = 0;
+        gLine = 1;
+      } // else
+    } // else if
+    else if ( !gError ) {
+      gHead = temp;
+
+      if ( temp->type == DOT ) {
+        gError = true;
+        if ( gLine < 1 ) gLine = 1;
+        gColumn++;
+        check = cin.peek();
+        cout << "\n> ERROR (unexpected character) : " ;
+        if ( check == '\n' )
+          cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+        else if ( check != EOF )
+          cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+        for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+          cin.get( scanChar );
+        check = cin.peek();
+        if ( check == EOF ) gEOF = true;
+        else {
+          cin.get( scanChar );
+          gColumn = 0;
+          gLine = 1;
+        } // else
+      } // if
+      else {
+        gLine = 0;
+        gColumn = 0;
+      } // else
+    } // else if
+  } // if
+} // BuildTree()
+
+void Tree1( bool haveLeft, TreePtr walk ) { // 先處理left 再right
+  TreePtr temp = new Tree;
+  TreePtr temp2 = new Tree;
+  ReadGarbage();
+  char check = cin.peek();
+  char scanChar = '\0';
+
+  if ( !gError && check != EOF ) {
+    if ( haveLeft ) haveLeft = false;
+    else if ( check == '(' ) {    // left讀到左括號
+      cin.get( temp->sexp[0] );
+      gColumn++;
+      temp->sexp[1] = '\0';
+      ReadGarbage();
+      check = cin.peek();
+      if ( check == EOF ) gEOF = true;
+      else if ( check == ')' ) {     // (() ?)
+        strcpy( temp->sexp, "nil" );
+        cin.get( scanChar );
+        gColumn++;
+        temp->type = NIL;
+        temp->haveDot = false;
+        temp->left = NULL;
+        temp->right = NULL;
+        walk->left = temp;
+      } // else if
+      else {                         // ( (...) ? )
+        temp->left = NULL;
+        temp->right = NULL;
+        temp->type = LPAREN;
+        temp->haveDot = false;
+        walk->left = temp;
+        Tree1( haveLeft, walk->left );
+        if ( !gError ) {
+          ReadGarbage();
+          check = cin.peek();
+          if ( check == EOF ) gEOF = true;
+          else if ( check == ')' ) {
+            cin.get( scanChar );
+            gColumn++;
+          } // else if
+        } // if
+      } // else
+    } // else if
+    else if ( check == '\'' ) { // ( '... ?)
+      cin.get( scanChar );
+      gColumn++;
+      walk->left = QuoteTree();
+    } // else if
+    else                         // ( ... ? )
+      walk->left = Scan();
+  } // if
+  // else if ( check == EOF ) gError = true;
+
+  if ( !gError && walk->left->type == DOT ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    check = cin.peek();
+    cout << "\n> ERROR (unexpected character) : ";
+    if ( check == '\n' )
+      cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+    else if ( check != EOF )
+      cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+    for ( check = check ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gEOF = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // if
+
+  if ( !gError ) {
+    temp = new Tree;
+    ReadGarbage();
+    check = cin.peek();
+
+    if ( check == EOF ) gEOF = true;
+    else if ( check != EOF ) { // right
+      if ( check == ')' ) {  // (...)
+        // cin.get( scanChar );
+        walk->right = NULL;
+      } // if
+      else if ( check == '.' ) {   // 可能是DOT
+        temp = Scan();
+        if ( !gError && gGetDOT ) {
+          walk->haveDot = true;
+          gGetDOT = false;
+          temp = new Tree;
+          ReadGarbage();
+          check = cin.peek();
+
+          if ( check == EOF ) gEOF = true;
+          else if ( check == '(' ) {
+            cin.get( temp->sexp[0] );
+            gColumn++;
+            temp->sexp[1] = '\0';
+            ReadGarbage();
+            check = cin.peek();
+            if ( check == EOF ) gEOF = true;
+            else if ( check == ')' ) {     // ( ? . () )
+              strcpy( temp->sexp, "nil" );
+              cin.get( scanChar );
+              gColumn++;
+              temp->type = NIL;
+              temp->haveDot = false;
+              temp->left = NULL;
+              temp->right = NULL;
+              walk->right = temp;
+            } // else if
+            else {                     // ( ? . (...) )
+              strcpy( temp->sexp, "(" );
+              temp->left = NULL;
+              temp->right = NULL;
+              temp->type = NOCOUT;
+              temp->haveDot = false;
+              walk->right = temp;
+              Tree1( haveLeft, walk->right );
+
+              if ( !gError ) {
+                ReadGarbage();
+                check = cin.peek();
+                if ( check == EOF ) gEOF = true;
+                else if ( check == ')' ) {
+                  cin.get( scanChar );
+                  gColumn++;
+                } // else if
+                else {
+                  gError = true;
+                  if ( gLine < 1 ) gLine = 1;
+                  gColumn++;
+                  cout << "\n> ERROR (unexpected character) : " ;
+                  cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+                  for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                    cin.get( scanChar );
+                  check = cin.peek();
+                  if ( check == EOF ) gEOF = true;
+                  else {
+                    cin.get( scanChar );
+                    gColumn = 0;
+                    gLine = 1;
+                  } // else
+                } // else
+              } // if
+            } // else
+          } // else if
+          else if ( check == '\'' ) {  // (... . '...)
+            cin.get( scanChar );
+            gColumn++;
+            walk->right = QuoteTree();
+            walk->right->type = NOCOUT;
+          } // else if
+          else if ( check == ')' ) {    //  ( ... . )
+            gError = true;
+            if ( gLine < 1 ) gLine = 1;
+            gColumn++;
+            cout << "\n> ERROR (unexpected character) : " ;
+            cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+            for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+              cin.get( scanChar );
+            check = cin.peek();
+            if ( check == EOF ) gEOF = true;
+            else {
+              cin.get( scanChar );
+              gColumn = 0;
+              gLine = 1;
+            } // else
+          } // else if
+          else if ( !gError && check != EOF ) {   //  ( ? . ? )
+            temp = Scan();
+            walk->right = temp;
+            if ( !gError && walk->right->type == DOT ) {
+              gError = true;
+              if ( gLine < 1 ) gLine = 1;
+              gColumn++;
+              check = cin.peek();
+              cout << "\n> ERROR (unexpected character) : ";
+              if ( check == '\n' )
+                cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+              else if ( check != EOF )
+                cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+              for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                cin.get( scanChar );
+              check = cin.peek();
+              if ( check == EOF ) gEOF = true;
+              else {
+                cin.get( scanChar );
+                gColumn = 0;
+                gLine = 1;
+              } // else
+            } // if
+          } // else if
+
+          if ( !gError && check != EOF ) {
+            ReadGarbage();
+            check = cin.peek();
+            if ( check == EOF ) gEOF = true;
+            else if ( check != ')' ) {
+              gError = true;
+              if ( gLine < 1 ) gLine = 1;
+              gColumn++;
+              cout << "\n> ERROR (unexpected character) : " ;
+              cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+              for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                cin.get( scanChar );
+              check = cin.peek();
+              if ( check == EOF ) gEOF = true;
+              else {
+                cin.get( scanChar );
+                gColumn = 0;
+                gLine = 1;
+              } // else
+            } // else if
+          } // if
+        } // if
+        else if ( !gError ) {                          // ( ? .xx )
+          haveLeft = true;
+          temp2 = new Tree;
+          strcpy( temp2->sexp, "(" );
+          temp2->sexp[1] = '\0';
+          temp2->left = temp;
+          temp2->right = NULL;
+          temp2->type = NOCOUT;
+          temp2->haveDot = false;
+          walk->right = temp2;
+
+          Tree1( haveLeft, walk->right );
+        } // else if
+      } // else if
+      else if ( !gError ) {  // 補虛擬括號
+        haveLeft = false;
+        temp2 = new Tree;
+        strcpy( temp2->sexp, "(" );
+        temp2->sexp[1] = '\0';
+        temp2->left = NULL;
+        temp2->right = NULL;
+        temp2->type = NOCOUT;
+        temp2->haveDot = false;
+        walk->right = temp2;
+
+        Tree1( haveLeft, walk->right );
+      } // else if
+    } // else if
+  } // if
+} // Tree1()
+
+TreePtr QuoteTree() {
+  char check = '\0';
+  char scanChar = '\0';
+  TreePtr walk = new Tree;
+  TreePtr temp = new Tree;
+  TreePtr temp2 = new Tree;
+  bool haveLeft = false;
+  strcpy( temp->sexp, "quote" );
+  temp->left = NULL;
+  temp->right = NULL;
+  temp->type = QUOTE;
+  temp->haveDot = false;
+
+  strcpy( temp2->sexp, "(" );
+  temp2->left = new Tree;
+  temp2->right = NULL;
+  temp2->type = NOCOUT;
+  temp2->haveDot = false;
+  ReadGarbage();
+  check = cin.peek();
+  if ( check == EOF )
+    gEOF = true;
+  else if ( check == '(' ) {
+    cin.get( scanChar );
+    gColumn++;
+    ReadGarbage();
+    check = cin.peek();
+    if ( check == EOF ) gEOF = true;
+    else if ( check == ')' ) {
+      strcpy( temp2->left->sexp, "nil" );
+      cin.get( scanChar );
+      gColumn++;
+      temp2->left->type = NIL;
+      temp2->left->left = NULL;
+      temp2->left->right = NULL;
+    } // else if
+    else {
+      strcpy( temp2->left->sexp, "(" );
+      temp2->left->left = NULL;
+      temp2->left->right = NULL;
+      temp2->left->type = LPAREN;
+      temp2->left->haveDot = false;
+      bool haveLeft = false;
+      Tree1( haveLeft, temp2->left );
+      if ( !gError ) {
+        ReadGarbage();
+        check = cin.peek();
+        if ( check == EOF ) gEOF = true;
+        if ( check == ')' ) {
+          cin.get( scanChar );
+          gColumn++;
+        } // if
+      } // if
+    } // else
+  } // else if
+  else if ( check == '\'' ) {
+    cin.get( scanChar );
+    gColumn++;
+    temp2->left = QuoteTree();
+  } // else if
+  else if ( check == ')' ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    cout << "\n> ERROR (unexpected character) : " ;
+    cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+    for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gEOF = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // else if
+  else
+    temp2->left = Scan();
+
+  if ( !gError && temp2->left->type == DOT ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    check = cin.peek();
+    cout << "\n> ERROR (unexpected character) : ";
+    if ( check == '\n' )
+      cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+    else if ( check != EOF )
+      cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+    for ( check = check ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gEOF = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // if
+
+  strcpy( walk->sexp, "(" );
+  walk->left = temp;
+  walk->right = temp2;
+  walk->type = LPAREN;
+  walk->haveDot = false;
+  return walk;
+} // QuoteTree()
+
+TreePtr Scan() {
+  int i = 0, j = 0;
+  char end = cin.peek();
+  TreePtr temp = new Tree;
+  temp->left = NULL;
+  temp->right = NULL;
+  temp->haveDot = false;
+
+  if ( end == '"' ) { // 字串
+    temp->type = STRING;
+    cin.get( temp->sexp[0] );
+    HandleString( temp->sexp );
+    return temp;
+  } // if
+  else if ( end == EOF ) gError = true;
+  else { // 處理symbol&&其他
+    for ( end = cin.peek() ; end != EOF && end != '\n' && end != ' ' && end != ';' &&
+          end != '(' && end != ')' && end != '"' && end != '\'' ; end = cin.peek() ) {
+      cin.get( temp->sexp[i] );
+      i++;
+      end = cin.peek();
+      if ( end == ';' && i != 0 ) {
+        cin.get( temp->sexp[i] );
+        i++;
+      } // if
+    } // for
+
+    end = cin.peek() ;
+    if ( end == EOF ) gEOF = true;
+    temp->sexp[i] = '\0';
+    gColumn = gColumn + i;
+    strcpy( gStr, temp->sexp );
+    if ( strcmp( temp->sexp, "." ) == 0 ) { // Dot
+      gGetDOT = true;
+      temp->type = DOT;
+      return temp;
+    } // if
+    else if ( ( gStr[0] == '-' || gStr[0] == '+' || isdigit( gStr[0] ) || gStr[0] == '.' ) &&
+              strcmp( gStr, "-" ) != 0 && strcmp( gStr, "+" ) != 0 && strcmp( gStr, "." ) != 0 &&
+              strcmp( gStr, "-." ) != 0 && strcmp( gStr, "+." ) != 0 ) { // 數字
+      int count = 0;
+      bool typeF = true;
+      for ( j = 0 ; j < strlen( gStr ) ; j++ ) {
+        if ( j > 0 && !isdigit( gStr[j] ) && gStr[j] != '.' )
+          typeF = false;
+        if ( gStr[j] == '.' ) count++;
+      } // for
+
+      if ( count == 0 && typeF ) temp->type = INT;
+      if ( count == 1 && typeF ) temp->type = FLOAT;
+      if ( count < 2 && typeF ) HandleFloat( count );
+      if ( temp->type != INT && temp->type != FLOAT ) temp->type = SYMBOL;
+      strcpy( temp->sexp, gStr );
+    } // else if
+    else if ( strcmp( gStr, "t" ) == 0 || strcmp( gStr, "#t" ) == 0 ) {
+      temp->type = T;
+      strcpy( temp->sexp, "#t" );
+    } // else if
+    else if ( strcmp( gStr, "#f" ) == 0 || strcmp( gStr, "nil" ) == 0 ) {
+      temp->type = NIL;
+      strcpy( temp->sexp, "nil" );
+    } // else if
+    else temp->type = SYMBOL;
+
+    return temp;
+  } // else
+
+} // Scan()
+
+void HandleString( Str300 & sexp ) {
+  int i = 1;
+  char check = '\0';
+  for ( check = cin.peek() ; check != EOF && check != '\n' && check != '"' ; check = cin.peek() ) {
+    cin.get( sexp[i] );
+    i++;
+  } // for
+
+  if ( check == '"' ) {
+    cin.get( sexp[i] );
+    sexp[ i + 1 ] = '\0' ;
+    gColumn = gColumn + i + 1;
+  } // if
+  else if ( check == '\n' ) {
+    // ErrorMessage
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    i++;
+    cout << "\n> ERROR (unexpected character) : " ;
+    cout << "line " << gLine << " column " << ( gColumn + i ) << " LINE-ENTER encountered\n";
+    gColumn = 0;
+    gLine = 1;
+  } // else if
+  else {
+    gError = true;
+    gColumn = 0;
+    gLine = 0;
+  } // else
+} // HandleString()
+
+void HandleFloat( int fl ) {
+  int count = 0;
+  Str300 temp;
+  if ( gStr[0] == '.' ) {
+    temp[0] = '0';
+    temp[1] = '\0';
+    strcat( temp, gStr );
+    strcpy( gStr, temp );
+  } // if
+  else if ( gStr[0] == '+' && gStr[1] == '.' )
+    gStr[0] = '0';
+  else if ( gStr[0] == '+' ) {
+    int i;
+    for ( i = 1 ; i < strlen( gStr ) ; i++ )
+      gStr[ i - 1 ] = gStr[i];
+
+    gStr[ i - 1 ] = '\0';
+  } // else if
+  else if ( gStr[0] == '-' && gStr[1] == '.' ) {
+    temp[0] = '-';
+    temp[1] = '\0';
+    gStr[0] = '0';
+    strcat( temp, gStr );
+    strcpy( gStr, temp );
+  } // else if
+
+  for ( int i = 0 ; i < strlen( gStr ) ; i++ ) {
+    if ( gStr[i] == '.' ) count = i + 1;
+  } // for
+
+  if ( fl == 1 && ( strlen( gStr ) - count ) < 3 ) strcat( gStr, "000" );
+  if ( fl == 1 && ( strlen( gStr ) - count ) >= 3 ) gStr[ count + 3 ] = '\0';
+
+  int count2 = 0, j = 0;
+  bool num = true;
+  if ( gStr[0] == '-' ) j = 1;
+  for ( int i = 0 ; i < strlen( gStr ) && gStr[i] != '.' ; i++ ) {
+    if  ( isdigit( gStr[i] ) && gStr[i] != '0' ) num = false;
+    if ( gStr[i] == '0' && num ) count2++;
+  } // for
+
+  if ( fl == 1 && gStr[ count - 2 ] == '0' && num ) count2--;
+  if ( fl == 0 && gStr[ strlen( gStr ) - 1 ] == '0' && num ) count2--;
+  // cout << "count2:" << count2 << endl;
+  for ( int i = count2 ; count2 > 0 && i < strlen( gStr ) ; i++ )
+    gStr[ i - count2 ] = gStr[i];
+  if ( count2 > 0 ) {
+    if ( j == 1 ) gStr[0] = '-';
+    gStr[ strlen( gStr ) - count2 ] = '\0';
+  } // if
+
+  if ( strcmp( gStr, "+0" ) == 0 || strcmp( gStr, "-0" ) == 0 ) {
+    strcpy( gStr, "0" );
+    gStr[ 1 ] = '\0';
+  } // if
+
+  if ( strcmp( gStr, "+0.000" ) == 0 ) {
+    strcpy( gStr, "0.000" );
+    gStr[ 5 ] = '\0';
+  } // if
+} // HandleFloat()
+
+void HandleNIL( TreePtr & head, int treeLEFT, int treeRIGHT ) {
+  if ( head != NULL ) {
+    // if ( !head->haveQuote )
+    //   cout << head->sexp << " " << treeLEFT << " " << treeRIGHT << endl;
+    if ( head->right != NULL && head->right->type == NIL && head->haveDot &&
+         head->right->left == NULL && head->right->right == NULL )
+      head->right->type = NOCOUT;
+    HandleNIL( head->left, treeLEFT + 1, treeRIGHT );
+    HandleNIL( head->right, treeLEFT, treeRIGHT + 1 );
+  } // if
+} // HandleNIL()
+
+void OutputTree( TreePtr head, int treeLEFT, int treeRIGHT ) {
+  if ( head != NULL ) {
+    cout << head->sexp << " " << treeLEFT << " " << treeRIGHT << endl;
+    HandleNIL( head->left, treeLEFT + 1, treeRIGHT );
+    HandleNIL( head->right, treeLEFT, treeRIGHT + 1 );
+  } // if
+} // OutputTree()
+
+void HandleQuote( TreePtr & head, bool haveQ, int treeLEFT, int treeRIGHT ) {
+  if ( head != NULL ) {
+    // cout << head->sexp << " " << treeLEFT << " " << treeRIGHT ;
+    if ( haveQ ) head->haveQuote = true;
+    else head->haveQuote = false;
+
+    // if ( head->haveQuote ) cout << " have" << endl;
+    // if ( !head->haveQuote ) cout << " no" << endl;
+    if ( head->left != NULL && head->left->type == QUOTE )
+      haveQ = true;
+
+    HandleQuote( head->left, haveQ, treeLEFT + 1, treeRIGHT );
+    HandleQuote( head->right, haveQ, treeLEFT, treeRIGHT + 1 );
+  } // if
+} // HandleQuote()
+
+void CopyTree( TreePtr tree1, TreePtr & tree2 ) {
+  if ( tree1 != NULL ) {
+    tree2 = new Tree;
+    strcpy( tree2->sexp, tree1->sexp );
+    tree2->type = tree1->type;
+    tree2->haveQuote = tree1->haveQuote;
+    tree2->site = tree1->site;
+    tree2->haveDot = tree1->haveDot;
+    tree2->left = NULL;
+    tree2->right = NULL;
+    CopyTree( tree1->left, tree2->left );
+    CopyTree( tree1->right, tree2->right );
+  } // if
+} // CopyTree()
+
+TreePtr Eval( TreePtr head, bool first ) {
+  TreePtr walk = NULL ;
+  TreePtr temp = NULL ;
+  bool hasSymbol = false;
+  int num = 0;
+  if ( head->type != NOCOUT && head->type != LPAREN && head->type != SYMBOL )   // 數字字串TNIL
+    return head ;
+  else if ( head->type == SYMBOL ) {   // symbol
+    TreePtr temp2 = new Tree;
+    head = IsSymbol( head, gEvalHead );
+    // if ( !gEvalError && head->type == UNBOUNDSYMBOL )
+    //   head->type == LPAREN;
+    CopyTree( head, temp2 );
+    return temp2 ;
+  } // else if
+  else {
+    for ( TreePtr checkTree = head ; checkTree != NULL ; checkTree = checkTree->right ) {
+      if ( checkTree->type != NOCOUT && checkTree->type != LPAREN && checkTree->type != NIL ) {
+        head->left->type = INCORRECTTYPE;
+        return head->left ;
+      } // if
+    } // for
+
+    for ( TreePtr walk = head->right ; walk != NULL && walk->type != NIL ; walk = walk->right )
+      num++ ;
+
+    if ( !first && ( strcmp( head->left->sexp, "define" ) == 0 ||
+                     strcmp( head->left->sexp, "clean-environment" ) == 0 ) ) {
+      gEvalError = true;
+      head->left->type = FORMATERROR;
+      return head->left;
+    } // if
+
+    // first = false;
+    if ( strcmp( head->left->sexp, "quote" ) == 0 ) {
+      head->right->left->site = ( int* ) head->right->left ; // 記憶體位置
+      return head->right->left;
+    } // if
+
+    if ( head->left->type == LPAREN ) {
+      head->left = Eval( head->left, false );
+    } // if
+
+    if ( head->left->type == UNBOUNDSYMBOL ) return head->left;
+
+    if ( !IsFunc( head->left ) )
+      head->left = CSymbol( head->left, gEvalHead );
+    // cout << "head->left after is " << head->left->sexp << endl;
+    if ( head->left->haveQuote ) {
+      gEvalError = true;
+      head->left->type = NOTFUNCTION;
+      return head->left ;
+    } // if
+
+    if ( strcmp( head->left->sexp, gDefine ) == 0 ) {            // define
+      if ( num != 2 ||
+           ( head->right->left->type != SYMBOL && head->right->left->type != STRING &&
+             strcmp( head->right->left->sexp, "(" ) != 0 ) ) {
+        gEvalError = true;
+        head->left->type = FORMATERROR;
+        return head->left;
+      } // if
+      else
+        return Define( head );
+    } // if
+    else if ( strcmp( head->left->sexp, gClean ) == 0 ) { // clean-environment
+      gEvalHead = NULL;
+      strcpy( head->left->sexp, "environment cleaned" );
+      return head->left;
+    } // else if
+    else if ( strcmp( head->left->sexp, gCons ) == 0 || strcmp( head->left->sexp, gList ) == 0 ) // cons list
+      if ( ( strcmp( head->left->sexp, gCons ) == 0 && num != 2 ) ||
+           ( strcmp( head->left->sexp, gList ) == 0 && num < 1 ) ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Cons_List( head, first );
+    else if ( strcmp( head->left->sexp, gCar ) == 0 || strcmp( head->left->sexp, gCdr ) == 0 ) { // car cdr
+      if ( num != 1 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Car_Cdr( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gPair ) == 0 || strcmp( head->left->sexp, gSymbol ) == 0 ||
+              strcmp( head->left->sexp, gNull ) == 0 || strcmp( head->left->sexp, gInteger ) == 0 ||
+              strcmp( head->left->sexp, gReal ) == 0 || strcmp( head->left->sexp, gNumber ) == 0 ||
+              strcmp( head->left->sexp, gString ) == 0 || strcmp( head->left->sexp, gBoolean ) == 0 ) {
+                                            // pair null integer real number string boolean symbol
+      if ( num != 1 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Prim( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gPlus ) == 0 || strcmp( head->left->sexp, gDivide ) == 0 ||  // +-*/
+              strcmp( head->left->sexp, gMinus ) == 0 || strcmp( head->left->sexp, gMultiply ) == 0 ) {
+      if ( num < 2 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Arithmetic( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gMoreover ) == 0 || strcmp( head->left->sexp, gMorethan ) == 0 ||
+              strcmp( head->left->sexp, gLessover ) == 0 || strcmp( head->left->sexp, gLessthan ) == 0 ||
+              strcmp( head->left->sexp, gEqual ) == 0 ) {    // "<"  "<="  ">"  ">="  "="
+      if ( num < 2 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Compare( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gStringAppend ) == 0 ) {  // string-append
+      if ( num < 2 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return StringAppend( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gStringCom ) == 0 ) {  // string>?
+      if ( num < 2 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return StringCompare( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gNot ) == 0 || strcmp( head->left->sexp, gAnd ) == 0 ||
+              strcmp( head->left->sexp, gOr ) == 0 ) {  // not and or
+      if ( ( strcmp( head->left->sexp, gNot ) == 0 && num != 1 ) ||
+           ( strcmp( head->left->sexp, gNot ) != 0 && num != 2 ) ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Not_And_Or( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gEqv ) == 0 || strcmp( head->left->sexp, gEqu ) == 0 ) { // eqvequal?
+      if ( num != 2 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Eqv_Equal( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gIf ) == 0 || strcmp( head->left->sexp, gCond ) == 0 ) {  // if cond
+      if ( ( strcmp( head->left->sexp, gIf ) == 0 && num != 3 ) ||
+           ( strcmp( head->left->sexp, gCond ) == 0 && num < 1 ) ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else if ( strcmp( head->left->sexp, gIf ) == 0 )
+        return Iff( head, first );
+      else
+        return Cond( head, first );
+    } // else if
+    else if ( strcmp( head->left->sexp, gBegin ) == 0 ) {  // begin
+      if ( num < 1 ) {
+        gEvalError = true;
+        head->left->type = INCORRECTNUM;
+        return head->left;
+      } // if
+      else
+        return Begin( head, first );
+    } // else if
+    else {
+      TreePtr temp2 = new Tree;
+      if ( head->left->type == SYMBOL ) {
+        head->left = IsSymbol( head->left, gEvalHead );
+        if ( head->left->type != UNBOUNDSYMBOL ) {
+          strcpy( temp2->sexp, head->left->sexp );
+          temp2->type = NOTFUNCTION;
+          head->left = temp2;
+        } // if
+      } // if
+      else
+        head->left->type = NOTFUNCTION;
+
+      gEvalError = true;
+      return head->left ;
+    } // else
+  } // else
+} // Eval()
+
+bool IsFunc( TreePtr head ) {
+  if ( strcmp( head->sexp, gDefine ) == 0 ||
+       strcmp( head->sexp, gClean ) == 0 ||
+       strcmp( head->sexp, gCons ) == 0 ||
+       strcmp( head->sexp, gList ) == 0 ||
+       strcmp( head->sexp, gCar ) == 0 ||
+       strcmp( head->sexp, gCdr ) == 0 ||
+       strcmp( head->sexp, gPair ) == 0 ||
+       strcmp( head->sexp, gSymbol ) == 0 ||
+       strcmp( head->sexp, gNull ) == 0 ||
+       strcmp( head->sexp, gInteger ) == 0 ||
+       strcmp( head->sexp, gReal ) == 0 ||
+       strcmp( head->sexp, gNumber ) == 0 ||
+       strcmp( head->sexp, gString ) == 0 ||
+       strcmp( head->sexp, gBoolean ) == 0 ||
+       strcmp( head->sexp, gPlus ) == 0 ||
+       strcmp( head->sexp, gDivide ) == 0 ||
+       strcmp( head->sexp, gMinus ) == 0 ||
+       strcmp( head->sexp, gMultiply ) == 0 ||
+       strcmp( head->sexp, gMoreover ) == 0 ||
+       strcmp( head->sexp, gMorethan ) == 0 ||
+       strcmp( head->sexp, gLessover ) == 0 ||
+       strcmp( head->sexp, gLessthan ) == 0 ||
+       strcmp( head->sexp, gEqual ) == 0 ||
+       strcmp( head->sexp, gStringAppend ) == 0 ||
+       strcmp( head->sexp, gStringCom ) == 0 ||
+       strcmp( head->sexp, gNot ) == 0 ||
+       strcmp( head->sexp, gAnd ) == 0 ||
+       strcmp( head->sexp, gOr ) == 0 ||
+       strcmp( head->sexp, gEqv ) == 0 ||
+       strcmp( head->sexp, gEqu ) == 0 ||
+       strcmp( head->sexp, gIf ) == 0 ||
+       strcmp( head->sexp, gCond ) == 0 ||
+       strcmp( head->sexp, gBegin ) == 0 )
+    return true;
+  return false;
+} // IsFunc()
+
+TreePtr CSymbol( TreePtr head, TreePtr walk ) {
+  while ( walk != NULL ) {
+    if ( walk->right->left->type == NOCOUT )
+      walk->right->left->type = LPAREN;
+    // cout << "left->sexp " << walk->left->sexp << " is " << walk->right->left->sexp << endl;
+    if ( strcmp( head->sexp, walk->left->sexp ) == 0 ) {
+      TreePtr temp = new Tree;
+      CopyTree( walk->right->left, temp );
+      temp->type = FUNC;
+      return temp ;
+    } // if
+
+    walk = walk->next;
+  } // while
+
+  return head ;
+} // CSymbol()
+
+bool DSymbol( TreePtr target, TreePtr head, TreePtr walk ) {
+  while ( walk != NULL ) {
+    // cout << "left->sexp " << walk->left->sexp << " is " << walk->right->left->sexp << endl;
+    if ( strcmp( head->sexp, walk->left->sexp ) == 0 ) {
+      if ( strcmp( target->sexp, walk->left->sexp ) == 0 )
+        return true ;
+      else
+        return DSymbol( target, walk->right->left, gEvalHead );
+    } // if
+
+    walk = walk->next;
+  } // while
+
+  return false ;
+} // DSymbol()
+
+TreePtr IsSymbol( TreePtr head, TreePtr walk ) {
+  int num = 1;
+  while ( walk != NULL ) {
+    if ( walk->right->left->type == NOCOUT )
+      walk->right->left->type = LPAREN;
+    if ( strcmp( head->sexp, walk->left->sexp ) == 0 ) {
+      // cout << walk->left->sexp << " is " << walk->right->left->sexp;
+      // cout << walk->right->left->type << endl;
+      TreePtr temp = new Tree;
+      CopyTree( walk->right->left, temp );
+      return temp ;
+    } // if
+
+    walk = walk->next;
+    num++;
+  } // while
+
+  if ( IsFunc( head ) )
+    return head;
+
+  gEvalError = true;
+  head->type = UNBOUNDSYMBOL ;
+  return head ;
+} // IsSymbol()
+
+TreePtr Define( TreePtr temp ) {
+  bool used = false;
+
+  if ( IsFunc( temp->right->left ) ) used = true;
+
+  if ( used ) {
+    gEvalError = true;
+    temp->left->type = FORMATERROR;
+    return temp->left ;
+  } // if
+
+  if ( temp->right->left->type != SYMBOL ) {
+    gEvalError = true;
+    temp->left->type = FORMATERROR;
+    return temp->left ;
+  } // if
+
+  if ( temp->right->right->left != NULL &&
+       ( temp->right->right->left->type == LPAREN || temp->right->right->left->type == SYMBOL ) ) {
+    temp->right->right->left = Eval( temp->right->right->left, false ) ;
+    if ( gEvalError )
+      return temp->right->right->left ;
+  } // if
+
+
+  used = false;
+  if ( gEvalHead == NULL ) {
+    used = true;
+    gEvalHead = new Tree;
+    strcpy( gEvalHead->sexp, temp->right->sexp );
+    gEvalHead->type = temp->right->type;
+    gEvalHead->site = temp->right->site;
+    gEvalHead->haveDot = temp->right->haveDot;
+    gEvalHead->haveQuote = temp->right->haveQuote;
+    gEvalHead->left = NULL;
+    gEvalHead->right = NULL;
+
+    gEvalHead->left = new Tree;
+    strcpy( gEvalHead->left->sexp, temp->right->left->sexp );
+    gEvalHead->left->type = temp->right->left->type;
+    gEvalHead->left->site = temp->right->left->site;
+    gEvalHead->left->haveDot = temp->right->left->haveDot;
+    gEvalHead->left->haveQuote = temp->right->left->haveQuote;
+    gEvalHead->left->left = NULL;
+    gEvalHead->left->right = NULL;
+
+    CopyTree( temp->right->right, gEvalHead->right );
+    gEvalHead->right->left->site = ( int* ) temp->right->right->left;
+    gEvalHead->next = NULL;
+    // cout << gEvalHead->left << " " << gEvalHead->right->left->sexp << endl ;
+  } // if
+
+  TreePtr walk = gEvalHead ;
+  // cout << temp->right->left->sexp << " with ";
+  // if ( used ) cout << "first";
+  while ( !used && walk != NULL ) {
+    // cout << walk->left->sexp << " " ;
+    if ( strcmp( walk->left->sexp, temp->right->left->sexp ) == 0 ) {
+      // cout << "this one: " << temp->right->right->left->sexp;
+      used = true;
+      CopyTree( temp->right->right, walk->right );
+      walk->right->left->site = ( int* ) temp->right->right->left;
+      if ( DSymbol( temp->right->left, temp->right->right->left, gEvalHead ) ) {
+        // cout << " Oh Shit! ";
+        strcpy( walk->left->sexp, "-1" );
+      } // if
+    } // if
+
+    if ( walk->next == NULL && !used ) {
+      // cout << "new";
+      CopyTree( temp->right, walk->next );
+      walk->next->left->site = ( int* ) temp->right->right->left;
+      walk->next->next = NULL;
+      used = true;
+    } // if
+
+    if ( walk != NULL ) walk = walk->next;
+  } // while
+
+  // cout << endl ;
+  TreePtr temp2 = new Tree;
+  strcpy( temp2->sexp, temp->right->left->sexp ) ;
+  strcat( temp2->sexp, " defined" ) ;
+  temp2->type = STRING;
+  temp2->left = NULL;
+  temp2->right = NULL;
+  temp2->next = NULL;
+  // cout << temp2->sexp << endl;
+  return temp2;
+} // Define()
+
+TreePtr Cons_List( TreePtr & temp, bool first ) {
+  if ( strcmp( temp->left->sexp, gCons ) == 0 ) {
+    if ( temp->right->left != NULL &&
+         ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+      temp->right->left = Eval( temp->right->left, false );
+      if ( gEvalError )
+        return temp->right->left;
+    } // if
+
+    if ( temp->right->right->left != NULL &&
+         ( temp->right->right->left->type == LPAREN || temp->right->right->left->type == SYMBOL ) ) {
+      temp->right->right->left = Eval( temp->right->right->left, false );
+      if ( gEvalError )
+        return temp->right->right->left;
+    } // if
+
+    temp->right->right = temp->right->right->left;
+    temp->right->haveDot = true;
+    if ( temp->right->right->type == LPAREN )
+      temp->right->right->type = NOCOUT;
+    /*
+    if ( first ) {
+      if ( IsFunc( temp->right->right ) && !temp->right->right->haveQuote )
+        strcpy( temp->right->right->sexp, "#<internal function>" );
+    } // if
+    */
+  } // if
+  else {
+    for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+      if ( walk->left != NULL &&
+           ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+        walk->left = Eval( walk->left, false );
+        if ( gEvalError )
+          return walk->left;
+      } // if
+    } // for
+  } // else
+
+  if ( temp->right->type == NOCOUT ) temp->right->type = LPAREN;
+  /*
+  if ( first ) {
+    for ( TreePtr walk2 = temp->right ; walk2 != NULL ; walk2 = walk2->right ) {
+      if ( walk2->left != NULL && IsFunc( walk2->left ) && !walk2->left->haveQuote )
+        strcpy( walk2->left->sexp, "#<internal function>" );
+    } // for
+  } // if
+  */
+  return temp->right;
+} // Cons_List()
+
+TreePtr Car_Cdr( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  if ( temp->right->left->type != NOCOUT && temp->right->left->type != LPAREN ) {
+    gEvalError = true;
+    temp->type = INCORRECTTYPE;
+    return temp;
+  } // if
+
+  if ( strcmp( temp->left->sexp, gCar ) == 0 ) {
+    /*
+    if ( first ) {
+      if ( IsFunc( temp->right->left->left ) && !temp->right->left->left->haveQuote )
+        strcpy( temp->right->left->left->sexp, "#<internal function>" );
+    } // if
+    */
+    return temp->right->left->left;
+  } // if
+
+  if ( strcmp( temp->left->sexp, gCdr ) == 0 ) {
+    if ( temp->right->left->right == NULL ) {
+      temp->right->left->right = new Tree;
+      strcpy( temp->right->left->right->sexp, "nil" );
+      temp->right->left->right->type = NIL;
+      temp->right->left->right->left = NULL;
+      temp->right->left->right->right = NULL;
+    } // if
+    else {
+      if ( strcmp( temp->right->left->right->sexp, "(" ) == 0 )
+        temp->right->left->right->type = LPAREN;
+    } // else
+
+    if ( first ) {
+      for ( TreePtr walk2 = temp->right->left->right ; walk2 != NULL ; walk2 = walk2->right ) {
+        if ( walk2->left != NULL && IsFunc( walk2->left ) && !walk2->left->haveQuote )
+          strcpy( walk2->left->sexp, "#<internal function>" );
+        // if( walk2->left != NULL && walk2->left->haveQuote ) cout << walk2->left->sexp << endl;
+
+      } // for
+    } // if
+
+    return temp->right->left->right;
+  } // if
+} // Car_Cdr()
+
+TreePtr Prim( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  bool pass = false;
+  if ( strcmp( temp->left->sexp, gPair ) == 0 &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == NOCOUT ) )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gNull ) == 0 && temp->right->left->type == NIL )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gInteger ) == 0 && temp->right->left->type == INT )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gReal ) == 0 && temp->right->left->type == FLOAT )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gNumber ) == 0 &&
+            ( temp->right->left->type == FLOAT || temp->right->left->type == INT ) )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gString ) == 0 && temp->right->left->type == STRING )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gBoolean ) == 0 &&
+            ( temp->right->left->type == NIL || temp->right->left->type == T ) )
+    pass = true ;
+  else if ( strcmp( temp->left->sexp, gSymbol ) == 0 && temp->right->left->type == SYMBOL )
+    pass = true ;
+
+  if ( pass ) {
+    temp->left->type = T ;
+    strcpy( temp->left->sexp, "#t" ) ;
+  } // if
+  else {
+    temp->left->type = NIL ;
+    strcpy( temp->left->sexp, "nil" ) ;
+  } // else
+
+  return temp->left ;
+} // Prim()
+
+TreePtr Arithmetic( TreePtr & temp, bool first ) {
+  int which = 0;
+  int sum = 0;
+  int num = 0;
+  float sum2 = 0.0;
+  float num2 = 0.0;
+  bool isfloat = false;
+  bool firstNum = true;
+  if ( strcmp( temp->left->sexp, gPlus ) == 0 ) which = 2;
+  else if ( strcmp( temp->left->sexp, gMinus ) == 0 ) which = 3;
+  else if ( strcmp( temp->left->sexp, gMultiply ) == 0 ) which = 4;
+  else if ( strcmp( temp->left->sexp, gDivide ) == 0 ) which = 5;
+
+  for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+      walk->left = Eval( walk->left, false );
+
+      if ( gEvalError )
+        return walk->left;
+    } // if
+
+    if ( walk->left->type != INT && walk->left->type != FLOAT ) {
+      gEvalError = true;
+      temp->type = INCORRECTTYPE;
+      temp->right = walk;
+      return temp;
+    } // if
+
+    if ( !isfloat && walk->left->type == INT ) {
+      sscanf( walk->left->sexp, "%d", &num );
+
+      if ( firstNum ) {
+        firstNum = false;
+        sum = num;
+      } // if
+      else if ( which == 2 )
+        sum = sum + num;
+      else if ( which == 3 )
+        sum = sum - num;
+      else if ( which == 4 )
+        sum = sum * num;
+      else if ( which == 5 )
+        sum = sum / num;
+
+      sum2 = sum;
+    } // if
+    else {
+      isfloat = true;
+      sscanf( walk->left->sexp, "%f", &num2 );
+
+      if ( firstNum ) {
+        firstNum = false;
+        sum2 = num2;
+      } // if
+      else if ( which == 2 )
+        sum2 = sum2 + num2;
+      else if ( which == 3 )
+        sum2 = sum2 - num2;
+      else if ( which == 4 )
+        sum2 = sum2 * num2;
+      else if ( which == 5 )
+        sum2 = sum2 / num2;
+    } // else
+  } // for
+
+  if ( isfloat ) {
+    sprintf( temp->left->sexp, "%f", sum2 );
+    temp->left->type = FLOAT;
+
+    int count = 0, i = 0;
+    int len = strlen( temp->left->sexp );
+    for ( i = 0 ; i < len ; i++ ) {
+      if ( temp->left->sexp[i] == '.' ) count = i + 1;
+    } // for
+
+    if ( count == 0 ) strcat( temp->left->sexp, ".000" );
+    if ( ( len - count ) == 1 ) strcat( temp->left->sexp, "00" );
+    if ( ( len - count ) == 2 ) strcat( temp->left->sexp, "0" );
+    if ( ( len - count ) > 3 ) {
+      for ( i = count + 3 ; i < len ; i++ )
+        temp->left->sexp[i] = '\0';
+    } // if
+  } // if
+  else {
+    sprintf( temp->left->sexp, "%d", sum );
+    temp->left->type = INT;
+  } // else
+
+  return temp->left;
+} // Arithmetic()
+
+TreePtr Compare( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  bool firstNum = true;
+  bool yes = true;
+  float num = 0.0;
+  float next = 0.0;
+  int which = 0;
+  if ( strcmp( temp->left->sexp, gMoreover ) == 0 ) which = 1;
+  else if ( strcmp( temp->left->sexp, gMorethan ) == 0 ) which = 2;
+  else if ( strcmp( temp->left->sexp, gLessover ) == 0 ) which = 3;
+  else if ( strcmp( temp->left->sexp, gLessthan ) == 0 ) which = 4;
+  else if ( strcmp( temp->left->sexp, gEqual ) == 0 ) which = 5;
+
+  for ( TreePtr walk = temp->right ; yes && walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+      walk->left = Eval( walk->left, false );
+
+      if ( gEvalError )
+        return walk->left;
+    } // if
+
+    sscanf( walk->left->sexp, "%f", &next );
+    if ( firstNum ) {
+      firstNum = false;
+      num = next;
+    } // if
+    else {
+      if ( which == 1 ) {
+        if ( ! ( num > next ) ) yes = false;
+      } // if
+      else if ( which == 2 ) {
+        if ( ! ( num >= next ) ) yes = false;
+      } // else if
+      else if ( which == 3 ) {
+        if ( ! ( num < next ) ) yes = false;
+      } // else if
+      else if ( which == 4 ) {
+        if ( ! ( num <= next ) ) yes = false;
+      } // else if
+      else if ( which == 5 ) {
+        if ( ! ( num == next ) ) yes = false;
+      } // else if
+
+      num = next;
+    } // else
+  } // for
+
+  if ( yes ) {
+    temp->left->type = T ;
+    strcpy( temp->left->sexp, "#t" ) ;
+  } // if
+  else {
+    temp->left->type = NIL ;
+    strcpy( temp->left->sexp, "nil" ) ;
+  } // else
+
+  return temp->left ;
+} // Compare()
+
+TreePtr StringAppend( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  int len = 0;
+  int i = 1;
+  Str300 totalSting;
+  Str300 tempString;
+  strcpy( totalSting, "\"" );
+  strcpy( tempString, "" );
+  for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+      walk->left = Eval( walk->left, false );
+
+      if ( gEvalError )
+        return walk->left;
+    } // if
+
+    if ( walk->left->type != STRING ) {
+      gEvalError = true;
+      temp->type = INCORRECTTYPE;
+      temp->right = walk;
+      return temp;
+    } // if
+
+    len = strlen( walk->left->sexp ) - 1;
+    for ( i = 1 ; i < len ; i++ )
+      tempString[ i - 1 ] =  walk->left->sexp[i];
+
+    tempString[ i - 1 ] = '\0';
+    strcat( totalSting, tempString );
+    strcpy( tempString, "" );
+  } // for
+
+  len = strlen( totalSting );
+  totalSting[len] = '"';
+  totalSting[ len + 1 ] = '\0';
+  strcpy( temp->left->sexp, totalSting );
+  temp->left->type = STRING;
+  return temp->left;
+} // StringAppend()
+
+TreePtr StringCompare( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  bool firstString = true;
+  bool yes = true;
+  Str300 input;
+  for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+      walk->left = Eval( walk->left, false );
+
+      if ( gEvalError )
+        return walk->left;
+    } // if
+
+    if ( walk->left->type != STRING ) {
+      gEvalError = true;
+      temp->type = INCORRECTTYPE;
+      temp->right = walk;
+      return temp;
+    } // if
+
+    if ( firstString ) {
+      firstString = false;
+      strcpy( input, walk->left->sexp );
+    } // if
+    else {
+      if ( strcmp( input, walk->left->sexp ) <= 0 )
+        yes = false;
+
+      strcpy( input, walk->left->sexp );
+    } // else
+  } // for
+
+  if ( yes ) {
+    temp->left->type = T;
+    strcpy( temp->left->sexp, "#t" );
+  } // if
+  else {
+    temp->left->type = NIL;
+    strcpy( temp->left->sexp, "nil" );
+  } // else
+
+  return temp->left;
+} // StringCompare()
+
+TreePtr Not_And_Or( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+  /*
+  if ( ( temp->right->left->type == FLOAT && strcmp( temp->right->left->sexp, "0.000" ) == 0 ) ||
+       ( temp->right->left->type == INT && strcmp( temp->right->left->sexp, "0" ) == 0 ) )
+    temp->right->left->type = NIL;
+  */
+  if ( strcmp( temp->left->sexp, "not" ) == 0 ) {
+    if ( temp->right->left->type == NIL ) {
+      temp->left->type = T;
+      strcpy( temp->left->sexp, "#t" ) ;
+    } // if
+    else {
+      temp->left->type = NIL;
+      strcpy( temp->left->sexp, "nil" ) ;
+    } // else
+  } // if
+  else {
+    if ( temp->right->right->left != NULL &&
+         ( temp->right->right->left->type == LPAREN || temp->right->right->left->type == SYMBOL ) ) {
+      temp->right->right->left = Eval( temp->right->right->left, false );
+
+      if ( gEvalError )
+        return temp->right->right->left;
+    } // if
+
+    // ( temp->right->right->left->type == FLOAT &&
+    //        strcmp( temp->right->right->left->sexp, "0.000" ) == 0 ) ||
+
+    if ( ( temp->right->right->left->type == INT && strcmp( temp->right->right->left->sexp, "0" ) == 0 ) )
+      temp->right->right->left->type = NIL;
+
+    if ( strcmp( temp->left->sexp, "and" ) == 0 ) {
+      if ( temp->right->left->type != NIL && temp->right->right->left->type != NIL ) {
+        temp->left->type = T ;
+        strcpy( temp->left->sexp, "#t" ) ;
+      } // if
+      else {
+        temp->left->type = NIL;
+        strcpy( temp->left->sexp, "nil" ) ;
+      } // else
+    } // if
+    else {
+      if ( temp->right->left->type == NIL && temp->right->right->left->type == NIL ) {
+        temp->left->type = NIL;
+        strcpy( temp->left->sexp, "nil" ) ;
+      } // if
+      else {
+        temp->left->type = T ;
+        strcpy( temp->left->sexp, "#t" ) ;
+      } // else
+    } // else
+  } // else
+
+  return temp->left ;
+} // Not_And_Or()
+
+TreePtr Eqv_Equal( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  if ( temp->right->right->left != NULL &&
+       ( temp->right->right->left->type == LPAREN || temp->right->right->left->type == SYMBOL ) ) {
+    temp->right->right->left = Eval( temp->right->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->right->left;
+  } // if
+
+  if ( strcmp( temp->left->sexp, "eqv?" ) == 0 &&
+       ( temp->right->left->type == STRING || temp->right->right->left->type == STRING ) ) {
+    strcpy( temp->left->sexp, "nil" ) ;
+    temp->left->type = NIL ;
+    return temp->left;
+  } // if
+
+  if ( strcmp( temp->left->sexp, "eqv?" ) == 0 ) {
+    if ( ( temp->right->left->type == INT && temp->right->right->left->type == INT ) ||
+         ( temp->right->left->type == FLOAT && temp->right->right->left->type == FLOAT ) ) {
+      if ( strcmp( temp->right->left->sexp, temp->right->right->left->sexp ) == 0 ) {
+        temp->left->type = T;
+        strcpy( temp->left->sexp, "#t" );
+      } // if
+      else {
+        temp->left->type = NIL;
+        strcpy( temp->left->sexp, "nil" );
+      } // else
+    } // if
+    else if ( temp->right->left->site == temp->right->right->left->site ) {
+      temp->left->type = T;
+      strcpy( temp->left->sexp, "#t" );
+    } // if
+    else {
+      temp->left->type = NIL;
+      strcpy( temp->left->sexp, "nil" );
+    } // else
+  } // if
+  else {
+    bool yes = true;
+    yes = EqualR( temp->right->left, temp->right->right->left );
+
+    if ( yes ) {
+      temp->left->type = T;
+      strcpy( temp->left->sexp, "#t" );
+    } // if
+    else {
+      temp->left->type = NIL;
+      strcpy( temp->left->sexp, "nil" );
+    } // else
+  } // else
+
+  return temp->left;
+} // Eqv_Equal()
+
+bool EqualR( TreePtr tree1, TreePtr tree2 ) {
+  bool yes = true;
+  if ( tree1 != NULL && tree2 != NULL ) {
+    if ( strcmp( tree1->sexp, tree2->sexp ) != 0 )
+      return false;
+    if ( yes ) yes = EqualR( tree1->left, tree2->left );
+    if ( yes ) yes = EqualR( tree1->right, tree2->right );
+  } // if
+  else if ( tree1 != NULL && tree2 == NULL )
+    return false;
+  else if ( tree1 == NULL && tree2 != NULL )
+    return false;
+
+  return yes;
+} // EqualR()
+
+TreePtr Iff( TreePtr & temp, bool first ) {
+  if ( temp->right->left != NULL &&
+       ( temp->right->left->type == LPAREN || temp->right->left->type == SYMBOL ) ) {
+    temp->right->left = Eval( temp->right->left, false );
+
+    if ( gEvalError )
+      return temp->right->left;
+  } // if
+
+  // ( temp->right->left->type == FLOAT && strcmp( temp->right->left->sexp, "0.000" ) == 0 ) ||
+  //      ( temp->right->left->type == INT && strcmp( temp->right->left->sexp, "0" ) == 0 ) ||
+
+  if ( temp->right->left->type == NIL ) {
+    if ( temp->right->right->right->left != NULL &&
+         ( temp->right->right->right->left->type == LPAREN ||
+           temp->right->right->right->left->type == SYMBOL ) ) {
+      temp->right->right->right->left = Eval( temp->right->right->right->left, false );
+
+      if ( gEvalError )
+        return temp->right->right->right->left;
+    } // if
+
+    return temp->right->right->right->left;
+  } // if
+  else {
+    if ( temp->right->right->left != NULL &&
+         ( temp->right->right->left->type == LPAREN ||
+           temp->right->right->left->type == SYMBOL ) ) {
+      temp->right->right->left = Eval( temp->right->right->left, false );
+
+      if ( gEvalError )
+        return temp->right->right->left;
+    } // if
+
+    return temp->right->right->left;
+  } // else
+} // Iff()
+
+TreePtr Cond( TreePtr & temp, bool first ) {
+  bool yes = false;
+  bool yes2 = false;
+  TreePtr temp2 = new Tree;
+  TreePtr temp3 = new Tree;
+  for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( strcmp( walk->left->sexp, "(" ) != 0 || walk->left->right == NULL ) ) {
+      gEvalError = true;
+      temp->type = CONDFORMATERROR ;
+      temp->right = walk->left ;
+      return temp;
+    } // if
+
+    if ( walk->left->left != NULL && strcmp( walk->left->left->sexp, "else" ) == 0 ) {
+      walk->left->left = Eval( walk->left->left, false );
+
+      if ( gEvalError ) {
+        yes = true;
+        temp2 = walk->left->left;
+      } // if
+    } // if
+    else if ( walk->left->left != NULL &&
+              ( walk->left->left->type == LPAREN || walk->left->left->type == SYMBOL ) ) {
+      walk->left->left = Eval( walk->left->left, false );
+
+      if ( !yes2 && gEvalError )
+        return walk->left->left;
+    } // else if
+
+
+    if ( ( walk->left->left->type == FLOAT && strcmp( walk->left->left->sexp, "0.000" ) == 0 ) ||
+         ( walk->left->left->type == INT && strcmp( walk->left->left->sexp, "0" ) == 0 ) )
+      walk->left->left->type = T;
+
+
+    if ( !yes2 && walk->left->left->type != NIL ) {
+      if ( !yes ) yes2 = true;
+      temp3 = walk->left;
+    } // if
+  } // for
+
+  if ( yes2 ) {
+    gEvalError = false;
+    return Begin( temp3, first );
+  } // if
+
+  if ( yes ) return temp2;
+  gEvalError = true;
+  temp->left->type = NORETURNVALUE;
+  return temp->left;
+} // Cond()
+
+TreePtr Begin( TreePtr & temp, bool first ) {
+  for ( TreePtr walk = temp->right ; walk != NULL && walk->type != NIL ; walk = walk->right ) {
+    if ( walk->left != NULL &&
+         ( walk->left->type == LPAREN || walk->left->type == SYMBOL ) ) {
+      walk->left = Eval( walk->left, false );
+
+      if ( gEvalError )
+        return walk->left;
+    } // if
+
+    if ( walk->right == NULL ) return walk->left;
+  } // for
+} // Begin()
+
+void EvalError( TreePtr temp ) {
+  if ( temp->type == UNBOUNDSYMBOL )
+    cout << "ERROR (unbound symbol) : " << temp->sexp << endl;
+  else if ( temp->type == INCORRECTTYPE ) {
+    cout << "ERROR (" << temp->left->sexp << " with incorrect argument type) : ";
+    int count = 0;
+    bool coutSPACE = true;
+    Output( temp->right->left, temp->right->left->haveDot, count, coutSPACE );
+  } // else if
+  else if ( temp->type == INCORRECTNUM )
+    cout << "ERROR (incorrect number of arguments) : " << temp->sexp << endl;
+  else if ( temp->type == NOTFUNCTION ) {
+    cout << "ERROR (attempt to apply non-function) : ";
+    int count = 0;
+    bool coutSPACE = true;
+    if ( strcmp( temp->sexp, "(" ) != 0 ) cout << temp->sexp << endl;
+    else {
+      temp->type = LPAREN;
+      Output( temp, temp->haveDot, count, coutSPACE );
+    } // else
+  } // else if
+  else if ( temp->type == FORMATERROR )
+    cout << "ERROR (" << temp->sexp << " format)\n";
+  else if ( temp->type == CONDFORMATERROR ) {
+    cout << "ERROR (cond parameter format) : ";
+    int count = 0;
+    bool coutSPACE = true;
+    if ( strcmp( temp->right->sexp, "(" ) != 0 ) cout << temp->right->sexp << "\n";
+    else
+      Output( temp->right, temp->right->haveDot, count, coutSPACE );
+  } // else if
+  else if ( temp->type == NORETURNVALUE ) {
+    cout << "ERROR (no return value) : " << temp->sexp << endl;
+  } // else if
+} // EvalError()
+
+void Output( TreePtr head, bool hasDot, int count, bool & coutSPACE ) {
+  if ( head != NULL ) {
+    if ( head->type == LPAREN ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      coutSPACE = false;
+      count++;
+      cout << "( " ;
+    } // if
+    else if ( head->type != NOCOUT ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+
+      if ( IsFunc( head ) && !head->haveQuote && head->type == FUNC )
+        strcpy( head->sexp, "#<internal function>" );
+
+      cout << head->sexp << "\n" ;
+      coutSPACE = true;
+    } // else if
+
+    Output( head->left, head->haveDot, count, coutSPACE );
+    if ( head->left != NULL && head->right != NULL && head->right->type != NOCOUT &&
+         head->haveDot && strcmp( head->right->sexp, "(" ) != 0 &&
+         strcmp( head->right->sexp, "nil" ) != 0 ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      cout << ".\n" ;
+    } // if
+
+    Output( head->right, head->haveDot, count, coutSPACE );
+    if ( head->type == LPAREN ) {
+      count--;
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      cout << ")\n" ;
+    } // if
+  } // if
+} // Output()
+

@@ -1,0 +1,785 @@
+# include <stdio.h>
+# include <string.h>
+# include <stdlib.h>
+# include <ctype.h>
+# include <iostream>
+
+using namespace std;
+static int uTestNum = 0;
+typedef char Str300[ 300 ];
+enum TokenType { LPAREN, RPAREN, INT, STRING, DOT, FLOAT, NIL, T, QUOTE, SYMBOL, END, SEMICOLON,
+                SPACE, TAB, NOCOUT
+};
+
+enum ErrorType { ERRORENTER, ERRORCHAR };
+
+struct Tree {
+  Str300 sexp;
+  int type;
+  bool haveDot;
+  Tree * left;
+  Tree * right;
+};
+
+typedef Tree * TreePtr ;
+Str300 gStr;
+int gLine = 1;
+int gColumn = 0;
+TreePtr gHead = NULL;
+bool gGetDOT = false ;
+bool gError = false ;
+
+void BuildTree() ;
+void Tree1( bool haveLeft, TreePtr walk ) ;
+TreePtr QuoteTree() ;
+TreePtr Scan() ;
+void ReadGarbage() ;
+void HandleString( Str300 & sexp ) ;
+void HandleFloat( int fl ) ;
+void HandleNIL( TreePtr & head, int treeLEFT, int treeRIGHT ) ;
+void Output( TreePtr head, bool hasDot, int count, bool & coutSPACE ) ;
+
+int main(int argc, char** argv) {
+  char ch = '\0' ;
+  char readEOF;
+  bool continous = true; // EOF
+  bool exit = false ; // 出現(EXIT)
+  TreePtr temp = NULL ;
+  cin >> uTestNum ;
+  cout << "Welcome to OurScheme!\n";
+  cin.get( ch ) ;
+  ReadGarbage();
+  if ( cin.peek() == EOF ) continous = false;
+  while ( continous && !exit ) {
+    gHead = new Tree;
+    gError = false;
+    gGetDOT = false ;
+    BuildTree();
+    temp = gHead;
+    if ( !gError ) {
+      cout << "\n> ";
+      if ( strcmp( gHead->sexp, "(" ) != 0 ) cout << gHead->sexp << "\n";
+      else if ( strcmp( gHead->sexp, "(" ) == 0 && strcmp( gHead->left->sexp, "exit" ) == 0 &&
+                ( gHead->right == NULL || strcmp( gHead->right->sexp, "nil" ) == 0 ) )
+        exit = true;
+      else {
+        int treeLEFT =  0, treeRIGHT = 0, count = 0;
+        HandleNIL( temp, treeLEFT, treeRIGHT );
+        bool coutSPACE = true;
+        Output( temp, temp->haveDot, count, coutSPACE );
+      } // else
+    } // if
+
+    if ( !exit ) ReadGarbage();
+    if ( !exit && cin.peek() == EOF ) continous = false;
+  } // while
+
+  if ( !exit )
+    cout << "\n> ERROR : END-OF-FILE encountered when there should be more input\n"
+            << "\nThanks for using OurScheme!";
+  else cout << "Thanks for using OurScheme!";
+
+  return 0;
+} // main()
+
+void ReadGarbage() {
+  char check = cin.peek();
+  if ( check == EOF ) gError = true;
+  char scanChar = '\0';
+  while ( check != EOF && ( check == ' ' || check == '\n' || check == ';' ) ) { // 讀掉空白換行分號
+    cin.get( scanChar );
+    // cout << check;
+    if ( check == ' ' ) gColumn++;
+    else if ( check == '\n' ) {
+      gColumn = 0;
+      gLine++;
+    } // else if
+    else if ( check == ';' ) {
+      for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+        cin.get( scanChar );
+      check = cin.peek();
+      if ( check == EOF ) gError = true;
+      else {
+        cin.get( scanChar );
+        gColumn = 0;
+        gLine++;
+      } // else
+    } // else if
+
+    // cout << " " << gLine << endl;
+    check = cin.peek();
+    if ( check == EOF ) gError = true;
+  } // while
+} // ReadGarbage()
+
+void BuildTree() {
+  ReadGarbage();
+  char check = cin.peek();
+  if ( check == EOF ) gError = true;
+  char scanChar = '\0';
+
+  if ( !gError && check != EOF ) {
+    TreePtr temp = new Tree;
+    if ( check != '(' && check != '\'' && check != ')' ) temp = Scan();
+
+    if ( check == '(' ) {
+      if ( gLine == 0 ) gLine++;
+      cin.get( gHead->sexp[0] );
+      gColumn++;
+      gHead->sexp[1] = '\0';
+      ReadGarbage();
+      check = cin.peek();
+      if ( check == EOF ) gError = true;
+      else if ( check == ')' ) {
+        strcpy( gHead->sexp, "nil" );
+        cin.get( scanChar );
+        gHead->type = NIL;
+        gHead->left = NULL;
+        gHead->right = NULL;
+        gLine = 0;
+        gColumn = 0;
+      } // else if
+      else {
+        gHead->left = NULL;
+        gHead->right = NULL;
+        gHead->type = LPAREN;
+        gHead->haveDot = false;
+        TreePtr walk = gHead;
+        bool haveLeft = false;
+        Tree1( haveLeft, walk );
+        if ( !gError ) {
+          ReadGarbage();
+          check = cin.peek();
+          if ( check == EOF ) gError = true;
+          if ( check == ')' ) cin.get( scanChar );
+          gLine = 0;
+          gColumn = 0;
+        } // if
+      } // else
+    } // if
+    else if ( check == '\'' ) {
+      if ( gLine == 0 ) gLine++;
+      cin.get( scanChar );
+      gColumn++;
+      gHead = QuoteTree();
+      gLine = 0;
+      gColumn = 0;
+    } // else if
+    else if ( check == ')' ) {
+      gError = true;
+      if ( gLine < 1 ) gLine = 1;
+      gColumn++;
+      cout << "\n> ERROR (unexpected character) : " ;
+      cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+      for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+        cin.get( scanChar );
+      check = cin.peek();
+      if ( check == EOF ) gError = true;
+      else {
+        cin.get( scanChar );
+        gColumn = 0;
+        gLine = 1;
+      } // else
+    } // else if
+    else if ( !gError ) {
+      gHead = temp;
+
+      if ( temp->type == DOT ) {
+        gError = true;
+        if ( gLine < 1 ) gLine = 1;
+        gColumn++;
+        check = cin.peek();
+        cout << "\n> ERROR (unexpected character) : " ;
+        if ( check == '\n' )
+          cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+        else if ( check != EOF )
+          cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+        for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+          cin.get( scanChar );
+        check = cin.peek();
+        if ( check == EOF ) gError = true;
+        else {
+          cin.get( scanChar );
+          gColumn = 0;
+          gLine = 1;
+        } // else
+      } // if
+      else {
+        gLine = 0;
+        gColumn = 0;
+      } // else
+    } // else if
+  } // if
+} // BuildTree()
+
+void Tree1( bool haveLeft, TreePtr walk ) { // 先處理left 再right
+  TreePtr temp = new Tree;
+  TreePtr temp2 = new Tree;
+  ReadGarbage();
+  char check = cin.peek();
+  char scanChar = '\0';
+
+  if ( !gError && check != EOF ) {
+    if ( haveLeft ) haveLeft = false;
+    else if ( check == '(' ) {    // left讀到左括號
+      cin.get( temp->sexp[0] );
+      gColumn++;
+      temp->sexp[1] = '\0';
+      ReadGarbage();
+      check = cin.peek();
+      if ( check == EOF ) gError = true;
+      else if ( check == ')' ) {     // (() ?)
+        strcpy( temp->sexp, "nil" );
+        cin.get( scanChar );
+        gColumn++;
+        temp->type = NIL;
+        temp->haveDot = false;
+        temp->left = NULL;
+        temp->right = NULL;
+        walk->left = temp;
+      } // else if
+      else {                         // ( (...) ? )
+        temp->left = NULL;
+        temp->right = NULL;
+        temp->type = LPAREN;
+        temp->haveDot = false;
+        walk->left = temp;
+        Tree1( haveLeft, walk->left );
+        if ( !gError ) {
+          ReadGarbage();
+          check = cin.peek();
+          if ( check == EOF ) gError = true;
+          else if ( check == ')' ) {
+            cin.get( scanChar );
+            gColumn++;
+          } // else if
+        } // if
+      } // else
+    } // else if
+    else if ( check == '\'' ) { // ( '... ?)
+      cin.get( scanChar );
+      gColumn++;
+      walk->left = QuoteTree();
+    } // else if
+    else                         // ( ... ? )
+      walk->left = Scan();
+  } // if
+  // else if ( check == EOF ) gError = true;
+
+  if ( !gError && walk->left->type == DOT ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    check = cin.peek();
+    cout << "\n> ERROR (unexpected character) : ";
+    if ( check == '\n' )
+      cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+    else if ( check != EOF )
+      cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+    for ( check = check ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gError = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // if
+
+  if ( !gError ) {
+    temp = new Tree;
+    ReadGarbage();
+    check = cin.peek();
+
+    if ( check == EOF ) gError = true;
+    else if ( check != EOF ) { // right
+      if ( check == ')' ) {  // (...)
+        // cin.get( scanChar );
+        walk->right = NULL;
+      } // if
+      else if ( check == '.' ) {   // 可能是DOT
+        temp = Scan();
+        if ( !gError && gGetDOT ) {
+          walk->haveDot = true;
+          gGetDOT = false;
+          temp = new Tree;
+          ReadGarbage();
+          check = cin.peek();
+
+          if ( check == EOF ) gError = true;
+          else if ( check == '(' ) {
+            cin.get( temp->sexp[0] );
+            gColumn++;
+            temp->sexp[1] = '\0';
+            ReadGarbage();
+            check = cin.peek();
+            if ( check == EOF ) gError = true;
+            else if ( check == ')' ) {     // ( ? . () )
+              strcpy( temp->sexp, "nil" );
+              cin.get( scanChar );
+              gColumn++;
+              temp->type = NIL;
+              temp->haveDot = false;
+              temp->left = NULL;
+              temp->right = NULL;
+              walk->right = temp;
+            } // else if
+            else {                     // ( ? . (...) )
+              strcpy( temp->sexp, "(" );
+              temp->left = NULL;
+              temp->right = NULL;
+              temp->type = NOCOUT;
+              temp->haveDot = false;
+              walk->right = temp;
+              Tree1( haveLeft, walk->right );
+
+              if ( !gError ) {
+                ReadGarbage();
+                check = cin.peek();
+                if ( check == EOF ) gError = true;
+                else if ( check == ')' ) {
+                  cin.get( scanChar );
+                  gColumn++;
+                } // else if
+                else {
+                  gError = true;
+                  if ( gLine < 1 ) gLine = 1;
+                  gColumn++;
+                  cout << "\n> ERROR (unexpected character) : " ;
+                  cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+                  for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                    cin.get( scanChar );
+                  check = cin.peek();
+                  if ( check == EOF ) gError = true;
+                  else {
+                    cin.get( scanChar );
+                    gColumn = 0;
+                    gLine = 1;
+                  } // else
+                } // else
+              } // if
+            } // else
+          } // else if
+          else if ( check == '\'' ) {  // (... . '...)
+            cin.get( scanChar );
+            gColumn++;
+            walk->right = QuoteTree();
+            walk->right->type = NOCOUT;
+          } // else if
+          else if ( check == ')' ) {    //  ( ... . )
+            gError = true;
+            if ( gLine < 1 ) gLine = 1;
+            gColumn++;
+            cout << "\n> ERROR (unexpected character) : " ;
+            cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+            for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+              cin.get( scanChar );
+            check = cin.peek();
+            if ( check == EOF ) gError = true;
+            else {
+              cin.get( scanChar );
+              gColumn = 0;
+              gLine = 1;
+            } // else
+          } // else if
+          else if ( !gError && check != EOF ) {   //  ( ? . ? )
+            temp = Scan();
+            walk->right = temp;
+            if ( !gError && walk->right->type == DOT ) {
+              gError = true;
+              if ( gLine < 1 ) gLine = 1;
+              gColumn++;
+              check = cin.peek();
+              cout << "\n> ERROR (unexpected character) : ";
+              if ( check == '\n' )
+                cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+              else if ( check != EOF )
+                cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+              for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                cin.get( scanChar );
+              check = cin.peek();
+              if ( check == EOF ) gError = true;
+              else {
+                cin.get( scanChar );
+                gColumn = 0;
+                gLine = 1;
+              } // else
+            } // if
+          } // else if
+
+          if ( !gError && check != EOF ) {
+            ReadGarbage();
+            check = cin.peek();
+            if ( check == EOF ) gError = true;
+            else if ( check != ')' ) {
+              gError = true;
+              if ( gLine < 1 ) gLine = 1;
+              gColumn++;
+              cout << "\n> ERROR (unexpected character) : " ;
+              cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+
+              for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+                cin.get( scanChar );
+              check = cin.peek();
+              if ( check == EOF ) gError = true;
+              else {
+                cin.get( scanChar );
+                gColumn = 0;
+                gLine = 1;
+              } // else
+            } // else if
+          } // if
+        } // if
+        else if ( !gError ) {                          // ( ? .xx )
+          haveLeft = true;
+          temp2 = new Tree;
+          strcpy( temp2->sexp, "(" );
+          temp2->sexp[1] = '\0';
+          temp2->left = temp;
+          temp2->right = NULL;
+          temp2->type = NOCOUT;
+          temp2->haveDot = false;
+          walk->right = temp2;
+
+          Tree1( haveLeft, walk->right );
+        } // else if
+      } // else if
+      else if ( !gError ) {  // 補虛擬括號
+        haveLeft = false;
+        temp2 = new Tree;
+        strcpy( temp2->sexp, "(" );
+        temp2->sexp[1] = '\0';
+        temp2->left = NULL;
+        temp2->right = NULL;
+        temp2->type = NOCOUT;
+        temp2->haveDot = false;
+        walk->right = temp2;
+
+        Tree1( haveLeft, walk->right );
+      } // else if
+    } // else if
+  } // if
+} // Tree1()
+
+TreePtr QuoteTree() {
+  char check = '\0';
+  char scanChar = '\0';
+  TreePtr walk = new Tree;
+  TreePtr temp = new Tree;
+  TreePtr temp2 = new Tree;
+  bool haveLeft = false;
+  strcpy( temp->sexp, "quote" );
+  temp->left = NULL;
+  temp->right = NULL;
+  temp->type = QUOTE;
+  temp->haveDot = false;
+
+  strcpy( temp2->sexp, "(" );
+  temp2->left = new Tree;
+  temp2->right = NULL;
+  temp2->type = NOCOUT;
+  temp2->haveDot = false;
+  ReadGarbage();
+  check = cin.peek();
+  if ( check == EOF )
+    gError = true;
+  else if ( check == '(' ) {
+    cin.get( scanChar );
+    gColumn++;
+    ReadGarbage();
+    check = cin.peek();
+    if ( check == EOF ) gError = true;
+    else if ( check == ')' ) {
+      strcpy( temp2->left->sexp, "nil" );
+      cin.get( scanChar );
+      gColumn++;
+      temp2->left->type = NIL;
+      temp2->left->left = NULL;
+      temp2->left->right = NULL;
+    } // else if
+    else {
+      strcpy( temp2->left->sexp, "(" );
+      temp2->left->left = NULL;
+      temp2->left->right = NULL;
+      temp2->left->type = LPAREN;
+      temp2->left->haveDot = false;
+      bool haveLeft = false;
+      Tree1( haveLeft, temp2->left );
+      if ( !gError ) {
+        ReadGarbage();
+        check = cin.peek();
+        if ( check == EOF ) gError = true;
+        if ( check == ')' ) {
+          cin.get( scanChar );
+          gColumn++;
+        } // if
+      } // if
+    } // else
+  } // else if
+  else if ( check == '\'' ) {
+    cin.get( scanChar );
+    gColumn++;
+    temp2->left = QuoteTree();
+  } // else if
+  else if ( check == ')' ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    cout << "\n> ERROR (unexpected character) : " ;
+    cout << "line " << gLine << " column " << gColumn << " character ')'\n";
+
+    for ( check = cin.peek() ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gError = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // else if
+  else
+    temp2->left = Scan();
+
+  if ( !gError && temp2->left->type == DOT ) {
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    gColumn++;
+    check = cin.peek();
+    cout << "\n> ERROR (unexpected character) : ";
+    if ( check == '\n' )
+      cout << "line " << gLine << " column " << gColumn << " LINE-ENTER encountered\n";
+    else if ( check != EOF )
+      cout << "line " << gLine << " column " << gColumn << " character '" << check << "'\n";
+    for ( check = check ; check != EOF && check != '\n' ; check = cin.peek() )
+      cin.get( scanChar );
+    check = cin.peek();
+    if ( check == EOF ) gError = true;
+    else {
+      cin.get( scanChar );
+      gColumn = 0;
+      gLine = 1;
+    } // else
+  } // if
+
+  strcpy( walk->sexp, "(" );
+  walk->left = temp;
+  walk->right = temp2;
+  walk->type = LPAREN;
+  walk->haveDot = false;
+  return walk;
+} // QuoteTree()
+
+TreePtr Scan() {
+  int i = 0, j = 0;
+  char end = cin.peek();
+  TreePtr temp = new Tree;
+  temp->left = NULL;
+  temp->right = NULL;
+  temp->haveDot = false;
+
+  if ( end == '"' ) { // 字串
+    temp->type = STRING;
+    cin.get( temp->sexp[0] );
+    HandleString( temp->sexp );
+    return temp;
+  } // if
+  else if ( end == EOF ) gError = true;
+  else { // 處理symbol&&其他
+    for ( end = cin.peek() ; end != EOF && end != '\n' && end != ' ' && end != ';' &&
+          end != '(' && end != ')' && end != '"' && end != '\'' ; end = cin.peek() ) {
+      cin.get( temp->sexp[i] );
+      i++;
+      end = cin.peek();
+      if ( end == ';' && i != 0 ) {
+        cin.get( temp->sexp[i] );
+        i++;
+      } // if
+    } // for
+
+    end = cin.peek() ;
+    if ( end == EOF ) gError = true;
+    temp->sexp[i] = '\0';
+    gColumn = gColumn + i;
+    strcpy( gStr, temp->sexp );
+    if ( strcmp( temp->sexp, "." ) == 0 ) { // Dot
+      gGetDOT = true;
+      temp->type = DOT;
+      return temp;
+    } // if
+    else if ( ( gStr[0] == '-' || gStr[0] == '+' || isdigit( gStr[0] ) || gStr[0] == '.' ) &&
+              strcmp( gStr, "-" ) != 0 && strcmp( gStr, "+" ) != 0 && strcmp( gStr, "." ) != 0 &&
+              strcmp( gStr, "-." ) != 0 && strcmp( gStr, "+." ) != 0 ) { // 數字
+      int count = 0;
+      bool typeF = true;
+      for ( j = 0 ; j < strlen( gStr ) ; j++ ) {
+        if ( j > 0 && !isdigit( gStr[j] ) && gStr[j] != '.' )
+          typeF = false;
+        if ( gStr[j] == '.' ) count++;
+      } // for
+
+      if ( count == 0 && typeF ) temp->type = INT;
+      if ( count == 1 && typeF ) temp->type = FLOAT;
+      if ( count < 2 && typeF ) HandleFloat( count );
+      if ( temp->type != INT || temp->type != FLOAT ) temp->type = SYMBOL;
+      strcpy( temp->sexp, gStr );
+    } // else if
+    else if ( strcmp( gStr, "t" ) == 0 || strcmp( gStr, "#t" ) == 0 ) {
+      temp->type = T;
+      strcpy( temp->sexp, "#t" );
+    } // else if
+    else if ( strcmp( gStr, "#f" ) == 0 || strcmp( gStr, "nil" ) == 0 ) {
+      temp->type = NIL;
+      strcpy( temp->sexp, "nil" );
+    } // else if
+    else temp->type = SYMBOL;
+
+    return temp;
+  } // else
+
+} // Scan()
+
+void HandleString( Str300 & sexp ) {
+  int i = 1;
+  char check = '\0';
+  for ( check = cin.peek() ; check != EOF && check != '\n' && check != '"' ; check = cin.peek() ) {
+    cin.get( sexp[i] );
+    i++;
+  } // for
+
+  if ( check == '"' ) {
+    cin.get( sexp[i] );
+    sexp[ i + 1 ] = '\0' ;
+    gColumn = gColumn + i + 1;
+  } // if
+  else if ( check == '\n' ) {
+    // ErrorMessage
+    gError = true;
+    if ( gLine < 1 ) gLine = 1;
+    i++;
+    cout << "\n> ERROR (unexpected character) : " ;
+    cout << "line " << gLine << " column " << ( gColumn + i ) << " LINE-ENTER encountered\n";
+    gColumn = 0;
+    gLine = 1;
+  } // else if
+  else {
+    gError = true;
+    gColumn = 0;
+    gLine = 0;
+  } // else
+} // HandleString()
+
+void HandleFloat( int fl ) {
+  int count = 0;
+  Str300 temp;
+  if ( gStr[0] == '.' ) {
+    temp[0] = '0';
+    temp[1] = '\0';
+    strcat( temp, gStr );
+    strcpy( gStr, temp );
+  } // if
+  else if ( gStr[0] == '+' && gStr[1] == '.' )
+    gStr[0] = '0';
+  else if ( gStr[0] == '+' ) {
+    int i;
+    for ( i = 1 ; i < strlen( gStr ) ; i++ )
+      gStr[ i - 1 ] = gStr[i];
+
+    gStr[ i - 1 ] = '\0';
+  } // else if
+  else if ( gStr[0] == '-' && gStr[1] == '.' ) {
+    temp[0] = '-';
+    temp[1] = '\0';
+    gStr[0] = '0';
+    strcat( temp, gStr );
+    strcpy( gStr, temp );
+  } // else if
+
+  for ( int i = 0 ; i < strlen( gStr ) ; i++ ) {
+    if ( gStr[i] == '.' ) count = i + 1;
+  } // for
+
+  if ( fl == 1 && ( strlen( gStr ) - count ) < 3 ) strcat( gStr, "000" );
+  if ( fl == 1 && ( strlen( gStr ) - count ) >= 3 ) gStr[ count + 3 ] = '\0';
+
+  int count2 = 0, j = 0;
+  bool num = true;
+  if ( gStr[0] == '-' ) j = 1;
+  for ( int i = 0 ; i < strlen( gStr ) && gStr[i] != '.' ; i++ ) {
+    if  ( isdigit( gStr[i] ) && gStr[i] != '0' ) num = false;
+    if ( gStr[i] == '0' && num ) count2++;
+  } // for
+
+  if ( fl == 1 && gStr[ count - 2 ] == '0' && num ) count2--;
+  if ( fl == 0 && gStr[ strlen( gStr ) - 1 ] == '0' && num ) count2--;
+  // cout << "count2:" << count2 << endl;
+  for ( int i = count2 ; count2 > 0 && i < strlen( gStr ) ; i++ )
+    gStr[ i - count2 ] = gStr[i];
+  if ( count2 > 0 ) {
+    if ( j == 1 ) gStr[0] = '-';
+    gStr[ strlen( gStr ) - count2 ] = '\0';
+  } // if
+
+  if ( strcmp( gStr, "+0" ) == 0 || strcmp( gStr, "-0" ) == 0 ) {
+    strcpy( gStr, "0" );
+    gStr[ 1 ] = '\0';
+  } // if
+
+  if ( strcmp( gStr, "+0.000" ) == 0 ) {
+    strcpy( gStr, "0.000" );
+    gStr[ 5 ] = '\0';
+  } // if
+} // HandleFloat()
+
+void HandleNIL( TreePtr & head, int treeLEFT, int treeRIGHT ) {
+  if ( head != NULL ) {
+    // if ( head->haveDot )
+    // cout << head->sexp << " " << treeLEFT << " " << treeRIGHT << endl;
+    if ( head->right != NULL && head->right->type == NIL && head->haveDot &&
+         head->right->left == NULL && head->right->right == NULL )
+      head->right->type = NOCOUT;
+    HandleNIL( head->left, treeLEFT + 1, treeRIGHT );
+    HandleNIL( head->right, treeLEFT, treeRIGHT + 1 );
+  } // if
+} // HandleNIL()
+
+void Output( TreePtr head, bool hasDot, int count, bool & coutSPACE ) {
+  if ( head != NULL ) {
+    if ( head->type == LPAREN ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      coutSPACE = false;
+      count++;
+      cout << "( " ;
+    } // if
+    else if ( head->type != NOCOUT ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      cout << head->sexp << "\n" ;
+      coutSPACE = true;
+    } // else if
+
+    Output( head->left, head->haveDot, count, coutSPACE );
+    if ( head->left != NULL && head->right != NULL && head->right->type != NOCOUT &&
+         head->haveDot && strcmp( head->right->sexp, "(" ) != 0 &&
+         strcmp( head->right->sexp, "nil" ) != 0 ) {
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      cout << ".\n" ;
+    } // if
+
+    Output( head->right, head->haveDot, count, coutSPACE );
+    if ( head->type == LPAREN ) {
+      count--;
+      for ( int i = 0 ; coutSPACE && i < count ; i++ )
+        cout << "  " ;
+      cout << ")\n" ;
+    } // if
+  } // if
+} // Output()
+
